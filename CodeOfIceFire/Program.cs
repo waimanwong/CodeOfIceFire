@@ -11,6 +11,11 @@ using System.Collections.Generic;
  **/
 class Player
 {
+    static void Debug(string message)
+    {
+        Console.Error.WriteLine(message);
+    }
+
     static void Main(string[] args)
     {
         string[] inputs;
