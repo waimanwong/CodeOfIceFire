@@ -34,6 +34,11 @@ namespace ACOIF
         private const int TRAIN_COST_LEVEL_2 = 20;
         private const int TRAIN_COST_LEVEL_3 = 30;
 
+        private const int TRAIN_UPKEEP_LEVEL_1 = 1;
+        private const int TRAIN_UPKEEP_LEVEL_2 = 4;
+        private const int TRAIN_UPKEEP_LEVEL_3 = 20;
+
+
         private static void Main()
         {
             var game = new Game();
@@ -380,10 +385,13 @@ namespace ACOIF
                 Position target = MyTeam == Team.Fire ? (1, 0) : (10, 11);
 
                 //Upkeep
-                MyGold -= Units.Sum(u => u.Cost);
+                MyGold -= Units.Sum(u => u.UpKeep);
 
                 if (MyGold >= TRAIN_COST_LEVEL_1)
                     Train(1, target);
+
+                if (MyGold >= TRAIN_COST_LEVEL_2)
+                    Train(2, target);
             }
 
             public void Train(int level, Position position)
@@ -421,6 +429,21 @@ namespace ACOIF
                         case 3: cost = TRAIN_COST_LEVEL_3; break;
                     }
                     return cost;
+                }
+            }
+
+            public int UpKeep
+            {
+                get
+                {
+                    int upkeep = 0;
+                    switch (Level)
+                    {
+                        case 1: upkeep = TRAIN_UPKEEP_LEVEL_1; break;
+                        case 2: upkeep = TRAIN_UPKEEP_LEVEL_2; break;
+                        case 3: upkeep = TRAIN_UPKEEP_LEVEL_3; break;
+                    }
+                    return upkeep;
                 }
             }
 
