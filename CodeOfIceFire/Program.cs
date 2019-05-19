@@ -1,4 +1,4 @@
-﻿#define SHOW_DEBUG
+﻿#define SHOW_DEBUG_OFF
 
 using System;
 using System.Collections.Generic;
@@ -48,6 +48,22 @@ namespace ACOIF
             }
         }
 
+        public class PreviousState
+        {
+            public Dictionary<int, Position> unitPreviousPositions = new Dictionary<int, Position>();
+            public Dictionary<Tuple<int, int>, bool> tilePreviousActiveStates = new Dictionary<Tuple<int, int>, bool>();
+            public Dictionary<Tuple<int, int>, int> tilePreviousOwners = new Dictionary<Tuple<int, int>, int>();
+               
+
+            public void Clear()
+            {
+                unitPreviousPositions.Clear();
+                tilePreviousActiveStates.Clear();
+                tilePreviousOwners.Clear();
+            }
+
+        }
+
         public class Game
         {
             public readonly List<Building> Buildings = new List<Building>();
@@ -77,6 +93,8 @@ namespace ACOIF
             public List<Position> OpponentPositions = new List<Position>();
             public List<Position> NeutralPositions = new List<Position>();
 
+            private PreviousState PreviousState = new PreviousState();
+
             public void Init()
             {
                 for (var y = 0; y < HEIGHT; y++)
@@ -96,6 +114,8 @@ namespace ACOIF
                 }
             }
 
+            public int MyMilitaryPower =>  MyUnits.Sum(u => u.Cost) + MyGold;
+            
             public void Update()
             {
                 Units.Clear();
@@ -106,6 +126,7 @@ namespace ACOIF
                 NeutralPositions.Clear();
 
                 Output.Clear();
+                PreviousState.Clear();
 
                 // --------------------------------------
 
@@ -156,13 +177,15 @@ namespace ACOIF
                 for (var i = 0; i < unitCount; i++)
                 {
                     var inputs = Console.ReadLine().Split(' ');
-                    Units.Add(new Unit
+                    var unit = new Unit
                     {
                         Owner = int.Parse(inputs[0]),
                         Id = int.Parse(inputs[1]),
                         Level = int.Parse(inputs[2]),
                         Position = (int.Parse(inputs[3]), int.Parse(inputs[4]))
-                    });
+                    };
+                    Units.Add(unit);
+
                 }
 
                 // --------------------------------
@@ -204,43 +227,167 @@ namespace ACOIF
              */
             public void Solve()
             {
+                var highestMilitaryPower = 0;
+                var bestOutput = "WAIT";
+                var watch = Stopwatch.StartNew();
+                while (watch.ElapsedMilliseconds < 40)
+                {
+
+                    SimulateOneTurn();
+
+                    if (highestMilitaryPower < this.MyMilitaryPower)
+                    {
+                        highestMilitaryPower = this.MyMilitaryPower;
+                        bestOutput = this.Output.ToString();
+                    }
+
+                    RevertChanges();
+
+                    PreviousState.Clear();
+                }
+
+                this.Output.Clear();
+                this.Output.Append(bestOutput);
+
+                Turn++;
+            }
+
+            private void SimulateOneTurn()
+            {
                 // Make sur the AI doesn't timeout
                 Wait();
 
                 MoveUnits();
 
                 TrainUnits();
-
-                Turn++;
             }
 
+            private void RevertChanges()
+            {
+                foreach(var previousState in this.PreviousState.tilePreviousActiveStates)
+                {
+                    int x = previousState.Key.Item1;
+                    int y = previousState.Key.Item2;
+
+                    this.Map[x, y].Active = previousState.Value;
+                }
+
+                foreach(var previousState in this.PreviousState.tilePreviousOwners)
+                {
+                    int x = previousState.Key.Item1;
+                    int y = previousState.Key.Item2;
+
+                    this.Map[x, y].Owner = previousState.Value;
+                }
+
+                foreach(var previousState in this.PreviousState.unitPreviousPositions)
+                {
+                    int unitId = previousState.Key;
+                    var previousPosition = previousState.Value;
+
+                    var unit = this.Units.Single(u => u.Id == unitId);
+
+                    unit.Position.X = previousPosition.X;
+                    unit.Position.Y = previousPosition.Y;
+
+                }
+            }
+
+            #region WAIT
+            public void Wait()
+            {
+                Output.Append("WAIT;");
+            }
+            #endregion
+
+            #region MOVE
             public void MoveUnits()
             {
-                // Rush center
-                Position target = MyTeam == Team.Fire ? (5, 5) : (6, 6);
-
-                if (Map[target.X, target.Y].IsOwned) return;
-
                 foreach (var unit in MyUnits)
-                    Move(unit.Id, target);
+                {
+                    Random rand = new Random();
+                    var possibleTargetMovePositions = ComputePossibleTargetPositions(unit.Position);
+
+                    if (possibleTargetMovePositions.Length > 0)
+                    {
+
+                        var randomTarget = possibleTargetMovePositions[rand.Next(possibleTargetMovePositions.Length)];
+
+                        Move(unit.Id, randomTarget);
+                    }
+                }
             }
+
+            private Position[] ComputePossibleTargetPositions(Position from)
+            {
+                List<Position> positions = new List<Position>
+                {
+                    (from.X - 1, from.Y),
+                    (from.X + 1, from.Y),
+                    (from.X, from.Y + 1),
+                    (from.X, from.Y - 1),
+                };
+
+                return positions.Where(p => CannotActOn(p) == false).ToArray();
+            }
+
+            private bool CannotActOn(Position position)
+            {
+                if ((0 <= position.X && position.X < WIDTH) &&
+                    (0 <= position.Y && position.Y < HEIGHT))
+                {
+
+                    var isWall = this.Map[position.X, position.Y].IsWall == true;
+                    var isFriendlyBuilding = this.Buildings.Any(b => b.IsOwned && b.Position == position);
+                    var isOccupiedByUnit = this.Units.Any(u => u.Position == position);
+
+                    return isWall || isFriendlyBuilding || isOccupiedByUnit;
+                }
+                else
+                {
+                    return true;
+                }
+            }
+
+            private void Move(int unitId, Position position)
+            {
+                var unit = this.MyUnits.Single(u => u.Id == unitId);
+
+                // Save unit state
+                this.PreviousState.unitPreviousPositions[unitId] = (unit.Position.X, unit.Position.Y);
+
+                // Handle unit change
+                unit.Position.X = position.X;
+                unit.Position.Y = position.Y;
+
+                var tile = this.Map[position.X, position.Y];
+
+                //Save tile state
+                this.PreviousState.tilePreviousActiveStates[new Tuple<int, int>(tile.Position.X, tile.Position.Y)] = tile.Active;
+                this.PreviousState.tilePreviousOwners[new Tuple<int, int>(tile.Position.X, tile.Position.Y)] = tile.Owner;
+
+                // Handle map change
+                tile.Owner = ME;
+                tile.Active = true;
+
+                Output.Append($"MOVE {unitId} {position.X} {position.Y};");
+            }
+
+            #endregion
 
             public void TrainUnits()
             {
                 Position target = MyTeam == Team.Fire ? (1, 0) : (10, 11);
 
+                //Upkeep
+                MyGold -= Units.Sum(u => u.Cost);
+
                 if (MyGold >= TRAIN_COST_LEVEL_1)
                     Train(1, target);
             }
 
-            public void Wait()
-            {
-                Output.Append("WAIT;");
-            }
-
             public void Train(int level, Position position)
             {
-                // TODO: Handle upkeep
                 int cost = 0;
                 switch (level)
                 {
@@ -253,12 +400,6 @@ namespace ACOIF
                 Output.Append($"TRAIN {level} {position.X} {position.Y};");
             }
 
-            public void Move(int id, Position position)
-            {
-                // TODO: Handle map change
-                Output.Append($"MOVE {id} {position.X} {position.Y};");
-            }
-
             // TODO: Handle Build command
         }
 
@@ -267,6 +408,21 @@ namespace ACOIF
         {
             public int Id;
             public int Level;
+
+            public int Cost
+            {
+                get
+                {
+                    int cost = 0;
+                    switch (Level)
+                    {
+                        case 1: cost = TRAIN_COST_LEVEL_1; break;
+                        case 2: cost = TRAIN_COST_LEVEL_2; break;
+                        case 3: cost = TRAIN_COST_LEVEL_3; break;
+                    }
+                    return cost;
+                }
+            }
 
             public override string ToString() => $"Unit => {base.ToString()} Id: {Id} Level: {Level}";
         }
